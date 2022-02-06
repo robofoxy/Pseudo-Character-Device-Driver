@@ -87,30 +87,54 @@ int filter_open(struct inode *inode, struct file *filp)
 	dev->readers[dev->numOfReaders].pid = current->pid;
 	dev->numOfReaders++;
 	
-	//printk(KERN_ALERT "Somebody was opened! PID:%d dev_deb:%d, MAJ:%d, MIN:%d, maxqsize:%d, maxmsgsize:%d, maxfilters:%d\n", dev->readers[0].pid, dev->deb, filter_major, filter_minor, maxqsize, maxmsgsize, maxfilters);
+	printk(KERN_ALERT "Somebody was opened! PID:%d dev_deb:%d, MAJ:%d, MIN:%d, maxqsize:%d, maxmsgsize:%d, maxfilters:%d\n", dev->readers[0].pid, dev->deb, filter_major, filter_minor, maxqsize, maxmsgsize, maxfilters);
 	
 	return 0;
 }
 
 int filter_release(struct inode *inode, struct file *filp)
 {
+	int index = -1, i;
+	
 	struct filter_dev *dev; /* device information */
 	dev = container_of(inode->i_cdev, struct filter_dev, cdev);
+	
 	
 	if(dev->numOfReaders == 1)
 	{
 		kfree(dev->readers);
-		dev->numOfReaders--;
 	}
 	else
 	{
-		reader_t* readers = kmalloc((dev->numOfReaders + 1) * sizeof(reader_t), GFP_KERNEL);
-		memcpy(readers, dev->readers, (dev->numOfReaders) * sizeof(reader_t));
-		kfree(dev->readers);
-		dev->readers = readers;
+		for (i = 0; i < dev->numOfReaders; i++)
+		{
+			if(dev->readers[i].pid == current->pid)
+			{
+				index = i;
+				break;
+			}
+		}
+		
+		if(index != -1)
+		{
+			reader_t* readers = kmalloc((dev->numOfReaders - 1) * sizeof(reader_t), GFP_KERNEL);
+			
+			memcpy(readers, &(dev->readers[0]), (index) * sizeof(reader_t));
+			if(index < dev->numOfReaders - 1)
+				memcpy(&(readers[index]), &(dev->readers[index+1]), (dev->numOfReaders - index - 1) * sizeof(reader_t));
+			
+			kfree(dev->readers);
+			dev->readers = readers;
+		}
+		else
+		{
+			printk(KERN_ALERT "ERROR when closing: reader missing.\n");
+			return 0;
+		}
 	}
 	
-	
+	dev->numOfReaders--;
+	printk(KERN_ALERT "NUM OF READERS %d.\n", dev->numOfReaders);
 	
 	return 0;
 }
