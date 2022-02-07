@@ -1,0 +1,38 @@
+#!/bin/sh
+
+module="filter"
+device="filter"
+mode="664"
+
+# Group: since distributions do it differently, look for wheel or use staff.
+if grep -q '^staff:' /etc/group; then
+    group="staff"
+else
+    group="wheel"
+fi
+
+# Invoke insmod with all provided arguments. Use a pathname, as insmod doesn't
+# look in . by default.
+insmod $module.ko filter_major=160 maxqsize=20 || exit 1
+
+# Retrieve the device major number.
+#major=$(awk "\$2==\"$module\" {print \$1}" /proc/devices)
+
+#echo "major:" $major
+
+# Remove stale nodes and replace them, then give gid and perms.
+
+# Usually a load script is shorter; scull just has a lot of associated devices.
+
+rm -f /dev/${device}0
+rm -f /dev/${device}1
+rm -f /dev/${device}2
+rm -f /dev/${device}3
+mknod /dev/${device}0 c 160 0
+mknod /dev/${device}1 c 160 1
+mknod /dev/${device}2 c 160 2
+mknod /dev/${device}3 c 160 3
+ln -sf ${device}0 /dev/${device}
+chgrp $group /dev/${device}[0-3] 
+chmod $mode  /dev/${device}[0-3]
+
