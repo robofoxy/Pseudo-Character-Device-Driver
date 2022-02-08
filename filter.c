@@ -271,17 +271,34 @@ ssize_t filter_write(struct file *filp, const char __user *buf, size_t count,
 /*
  * The ioctl() implementation.
  */
-
 long filter_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 {
 	int err = 0, r_index = -1, i, j, retval = 0, min_index = -1;
-	char tag, min = 255;
-	char* tags;
+	unsigned char tag, min = 255;
+	unsigned char* tags;
 	int* ctrl;
 	struct filter_dev* dev; /* device information */
 	reader_t* reader;
 	 
 	dev = filp->private_data;
+	
+	if (_IOC_TYPE(cmd) != FILTER_IOC_MAGIC)
+		return -ENOTTY;
+	if (_IOC_NR(cmd) > FILTER_IOCMAXNR)
+		return -ENOTTY;
+
+	/*
+	 * The direction is a bitmask, and VERIFY_WRITE catches R/W
+	 * transfers. `Type' is user-oriented, while access_ok is
+	 * kernel-oriented, so the concept of "read" and "write" is reversed.
+	 */
+	if (_IOC_DIR(cmd) & _IOC_READ)
+		err = !access_ok((void __user *)arg, _IOC_SIZE(cmd));
+	else if (_IOC_DIR(cmd) & _IOC_WRITE)
+		err = !access_ok((void __user *)arg, _IOC_SIZE(cmd));
+	if (err)
+		return -EFAULT;
+	
 	
 	if (mutex_lock_interruptible(&dev->mutex))
 		return -ERESTARTSYS;
@@ -307,7 +324,10 @@ long filter_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 	  	{
 	  		dev->readers[r_index].tags[i] = 0;
 	  	}
-	  		dev->readers[r_index].numOfTags = 0;
+	  	
+	  	dev->readers[r_index].numOfTags = 0;
+	  	
+	  	printk(KERN_ALERT "NumofTags: %d\n", dev->readers[r_index].numOfTags);
 	  
 		break;
         
@@ -317,11 +337,15 @@ long filter_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 	  	
 	  	if(dev->readers[r_index].numOfTags == maxfilters)
 	  	{
+			retval = -ENOTTY;
 	  		break;
 	  	}
 	  	
 	  	dev->readers[r_index].tags[dev->readers[r_index].numOfTags] = tag;
 	  	dev->readers[r_index].numOfTags++;
+	  	
+	  	printk(KERN_ALERT "NumofTags: %d\n", dev->readers[r_index].numOfTags);
+	  	
 		break;
 
 	  case FILTER_IOCTRMTAG:
@@ -354,9 +378,11 @@ long filter_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 	  	memset(ctrl, 0,  maxfilters * sizeof(int));
 	  	memset(tags, 0,  maxfilters);
 	  	
+//	  	printk(KERN_ALERT "unsorted_tags: %s\n", dev->readers[r_index].tags);
+	  	
 	  	for(i = 0; i < dev->readers[r_index].numOfTags; i++)
 	  	{
-	  		min = 256;
+	  		min = 255;
 	  		min_index = -1;
 	  		for(j = 0; j < dev->readers[r_index].numOfTags; j++)
 	  		{
@@ -371,13 +397,11 @@ long filter_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 	  		ctrl[min_index] = 1;
 	  	}
 	  	
-	  	for(i = 0; i < dev->readers[r_index].numOfTags; i++)
-	  	{
-	  		((char __user *)arg)[i] = tags[i];
-	  	}
+//	  	printk(KERN_ALERT "sorted_tags: %s\n", tags);
+	  	
+		memcpy((char* __user *)arg, tags, dev->readers[r_index].numOfTags);
 	  	
 	  	retval = dev->readers[r_index].numOfTags;
-	  	
 		break;
 	  default:  /* Redundant, as cmd was checked against MAXNR. */
 	  	mutex_unlock(&dev->mutex);
