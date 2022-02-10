@@ -47,11 +47,6 @@ int main()
 	ioctl (fd, FILTER_IOCGTAGS,tags);
 	printf("TAGS: %s\n", tags);
 	
-	ioctl(fd, FILTER_IOCCLRFILTER);
-	memset(tags, 0, FILTER_MAXTAG);
-	ioctl (fd, FILTER_IOCGTAGS,tags);
-	printf("TAGS: %s\n", tags);
-	
 	struct filter_message *p = malloc(sizeof(struct filter_message) + 10);
 	
 	read(fd, p, sizeof(struct filter_message) + 10);

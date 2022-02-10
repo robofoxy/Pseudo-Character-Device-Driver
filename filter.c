@@ -33,6 +33,10 @@ module_param(maxfilters, int, S_IRUGO);
 module_param(maxqsize, int, S_IRUGO);
 module_param(maxmsgsize, int, S_IRUGO);
 
+typedef struct message {
+	unsigned char tag;
+	char* body;
+} message_t;
 
 typedef struct reader {
 	pid_t pid;
@@ -43,7 +47,7 @@ typedef struct reader {
 
 struct filter_dev {
 	wait_queue_head_t inq;
-	filter_message_t* queue;
+	message_t* queue;
 	int* r_counters;
 	int index;
 	int numOfMsgs;
@@ -91,8 +95,8 @@ int filter_open(struct inode *inode, struct file *filp)
 		dev->readers[dev->numOfReaders].numOfTags = 0;
 		dev->numOfReaders++;
 		
-		printk(KERN_ALERT "Some reader opened! PID:%d, MAJ:%d, MIN:%d, maxqsize:%d, maxmsgsize:%d, maxfilters:%d, numOfReaders:%d \n", 
-				dev->readers[dev->numOfReaders - 1].pid, filter_major, filter_minor, maxqsize, maxmsgsize, maxfilters, dev->numOfReaders);
+//		printk(KERN_ALERT "Some reader opened! PID:%d, MAJ:%d, MIN:%d, maxqsize:%d, maxmsgsize:%d, maxfilters:%d, numOfReaders:%d \n", 
+//				dev->readers[dev->numOfReaders - 1].pid, filter_major, filter_minor, maxqsize, maxmsgsize, maxfilters, dev->numOfReaders);
 	}
 	
 	
@@ -169,7 +173,7 @@ int filter_release(struct inode *inode, struct file *filp)
 	}
 	
 	
-	printk(KERN_ALERT "NUM OF READERS %d.\n", dev->numOfReaders);
+//	printk(KERN_ALERT "NUM OF READERS %d.\n", dev->numOfReaders);
 	mutex_unlock(&dev->mutex);
 	
 	return 0;
@@ -177,7 +181,7 @@ int filter_release(struct inode *inode, struct file *filp)
 
 void eliminate_messages(struct filter_dev *dev)
 {
-	int numOfZeros = 0, i;
+	int numOfZeros = 0, i, j;
 
 	if(dev->numOfMsgs == 0)
 		return;
@@ -190,12 +194,14 @@ void eliminate_messages(struct filter_dev *dev)
 			numOfZeros++;
 	}
 	
-	
-	filter_message_t* msgs = kmalloc(maxqsize * (sizeof(filter_message_t) + maxmsgsize), GFP_KERNEL);
+	message_t* msgs = kmalloc(maxqsize * sizeof(message_t), GFP_KERNEL);
 	memset(msgs, 0, maxqsize);
+	for(j = 0; j < maxqsize; j++)
+		msgs[j].body = kmalloc(maxmsgsize, GFP_KERNEL);
 	
 	for(i = numOfZeros; i < dev->numOfMsgs; i++)
 	{
+		memcpy(msgs[i - numOfZeros].body, dev->queue[i].body, maxmsgsize);
 		msgs[i - numOfZeros] = dev->queue[i];
 	}
 	
@@ -207,33 +213,26 @@ void eliminate_messages(struct filter_dev *dev)
 
 void free_queue_capacity(struct filter_dev *dev)
 {
-	int i;
+	int i, j;
 
 	if(dev->numOfMsgs != maxqsize)
 		return;
 	
-	filter_message_t* msgs = kmalloc(maxqsize * (sizeof(filter_message_t) + maxmsgsize), GFP_KERNEL);
+	message_t* msgs = kmalloc(maxqsize * sizeof(message_t), GFP_KERNEL);
 	memset(msgs, 0, maxqsize);
+	for(j = 0; j < maxqsize; j++)
+		msgs[j].body = kmalloc(maxmsgsize, GFP_KERNEL);
 	
 	for(i = 1; i < dev->numOfMsgs; i++)
 	{
+		memcpy(msgs[i - 1].body, dev->queue[i].body, maxmsgsize);
 		msgs[i - 1] = dev->queue[i];
 	}
 	
 	kfree(dev->queue);
 	dev->queue = msgs;
 	
-	dev->numOfMsgs = dev->numOfMsgs - 1;
-}
-
-void print_all(struct filter_dev *dev)
-{
-	int i = 0;
-
-	for(; i < dev->numOfMsgs; i++)
-	{
-		printk(KERN_ALERT "	tag: %c, body: %s\n", dev->queue[i].tag, dev->queue[i].body);
-	}
+	dev->numOfMsgs--;
 }
 
 ssize_t filter_write(struct file *filp, const char __user *buf, size_t count,
@@ -260,8 +259,6 @@ ssize_t filter_write(struct file *filp, const char __user *buf, size_t count,
 	{
 		tbf = maxmsgsize + 1;
 	}
-	printk(KERN_ALERT "BEFORE: \n");
-	print_all(dev);
 	
 	if (copy_from_user(received, buf, tbf)) /* truncate if it is bigger than maxmsgsize */
 	{
@@ -269,19 +266,16 @@ ssize_t filter_write(struct file *filp, const char __user *buf, size_t count,
 		goto out;
 	}
 	
-	retval = strlen(received->body);
+	retval = tbf - 1;
 	
-	memcpy(&(dev->queue[dev->numOfMsgs]), received, sizeof(filter_message_t) + maxmsgsize);
-
-	printk(KERN_ALERT "RECEIVED MSG: %c %s", dev->queue[dev->numOfMsgs].tag, dev->queue[dev->numOfMsgs].body);
-	
+	dev->queue[dev->numOfMsgs].tag = received->tag;
+	memcpy(dev->queue[dev->numOfMsgs].body, received->body, tbf-1);
 	dev->r_counters[dev->numOfMsgs] = dev->numOfReaders;
 	dev->numOfMsgs++;
-	printk(KERN_ALERT "AFTER: \n");
-	print_all(dev);
+	
   out:
-	mutex_unlock(&dev->mutex);
 	wake_up_interruptible(&dev->inq);
+	mutex_unlock(&dev->mutex);
 	return retval;
 }
 
@@ -335,7 +329,8 @@ long filter_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		return -EFAULT;
 	}
 
-	switch(cmd) {
+	switch(cmd)
+	{
 	  case FILTER_IOCCLRFILTER:
 	  	for(i = 0; i < maxfilters; i++)
 	  	{
@@ -343,13 +338,10 @@ long filter_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 	  	}
 	  	
 	  	dev->readers[r_index].numOfTags = 0;
-	  	
-	  	printk(KERN_ALERT "NumofTags: %d\n", dev->readers[r_index].numOfTags);
 	  
 		break;
         
 	  case FILTER_IOCTADDTAG:  
-	  	printk(KERN_ALERT "RECEIVED TAG: %c, %d\n", (char __user *)arg, (int)((char __user *)arg));
 	  	tag = (char __user *)arg;
 	  	
 	  	if(dev->readers[r_index].numOfTags == maxfilters)
@@ -360,8 +352,6 @@ long filter_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 	  	
 	  	dev->readers[r_index].tags[dev->readers[r_index].numOfTags] = tag;
 	  	dev->readers[r_index].numOfTags++;
-	  	
-	  	printk(KERN_ALERT "NumofTags: %d\n", dev->readers[r_index].numOfTags);
 	  	
 		break;
 
@@ -432,13 +422,17 @@ long filter_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 int suitableMessageCheck(struct filter_dev *dev, reader_t reader)
 {
 	int i, j;
-	
+	if (mutex_lock_interruptible(&dev->mutex))
+		return -ERESTARTSYS;
+		
 	if(reader.dev_index == dev->numOfMsgs)
 	{
+		mutex_unlock(&dev->mutex);
 		return 0;
 	}
 	else if(reader.dev_index < dev->numOfMsgs && reader.numOfTags == 0)
 	{
+		mutex_unlock(&dev->mutex);
 		return 1;
 	}
 	
@@ -450,13 +444,13 @@ int suitableMessageCheck(struct filter_dev *dev, reader_t reader)
 		{
 			if(reader.tags[j] == tag)
 			{
-				printk(KERN_ALERT "TAG FOUND IN INDEX %d\n", i);
+				mutex_unlock(&dev->mutex);
 				return 1;
 			}
 		}
 	}
 	
-	printk(KERN_ALERT "CONDITION: 0 \n");
+	mutex_unlock(&dev->mutex);
 	return 0;
 }
 
@@ -473,7 +467,6 @@ int getSuitableMessage(struct filter_dev *dev, reader_t reader)
 			{
 				if(reader.tags[j] == tag)
 				{
-					printk(KERN_ALERT "TAG FOUND IN INDEX %d\n", i);
 					return i;
 				}
 			}
@@ -514,7 +507,8 @@ ssize_t filter_read(struct file *filp, char __user *buf, size_t count,
 	
 	mutex_unlock(&dev->mutex);
 	
-	if (filp->f_flags & O_NONBLOCK) {
+	if (filp->f_flags & O_NONBLOCK)
+	{
 		return -EAGAIN;
 	}
 	
@@ -526,16 +520,19 @@ ssize_t filter_read(struct file *filp, char __user *buf, size_t count,
 	dev = filp->private_data;
 		
 	m_index = getSuitableMessage(dev, dev->readers[r_index]);
-	printk(KERN_ALERT "suitable: %d\n", m_index);
 	
 	if(count > maxmsgsize + 1)
 		tbr = maxmsgsize + 1;
 	else
 		tbr = count;
 
-	printk(KERN_ALERT "word: %c %s\n", dev->queue[m_index].tag, dev->queue[m_index].body);
-
-	if (copy_to_user(buf, &(dev->queue[m_index]), tbr))
+	if (copy_to_user(buf, &(dev->queue[m_index]), sizeof(unsigned char)))
+	{
+		retval = -EFAULT;
+		goto out;
+	}
+	
+	if (copy_to_user(((char*)buf) + 1, dev->queue[m_index].body, tbr - 1))
 	{
 		retval = -EFAULT;
 		goto out;
@@ -591,8 +588,10 @@ void filter_cleanup_module(void)
 	dev_t devno = MKDEV(filter_major, 0);
 
 	/* Get rid of our char dev entries. */
-	if (filter_devices) {
-		for (i = 0; i < filter_minor; i++) {
+	if (filter_devices)
+	{
+		for (i = 0; i < filter_minor; i++)
+		{
 			filter_trim(filter_devices + i);
 			cdev_del(&filter_devices[i].cdev);
 		}
@@ -601,7 +600,7 @@ void filter_cleanup_module(void)
 
 	/* cleanup_module is never called if registering failed. */
 	unregister_chrdev_region(devno, filter_minor);
-	printk(KERN_ALERT "Goodbye, filter world\n");
+//	printk(KERN_ALERT "Goodbye, filter world\n");
 }
 
 static int filter_init(void)
@@ -619,7 +618,8 @@ static int filter_init(void)
 	
 	filter_devices = kmalloc(filter_minor * sizeof(struct filter_dev), GFP_KERNEL);
 	
-	if (!filter_devices) {
+	if (!filter_devices)
+	{
 		result = -ENOMEM;
 		goto fail;
 	}
@@ -627,8 +627,10 @@ static int filter_init(void)
 	
 	for(i = 0; i < filter_minor; i++)
 	{
-		filter_devices[i].queue = kmalloc(maxqsize * (sizeof(filter_message_t) + maxmsgsize), GFP_KERNEL);
-		memset(filter_devices[i].queue, 0, maxqsize);
+		filter_devices[i].queue = kmalloc(maxqsize * sizeof(message_t), GFP_KERNEL);
+		for(j = 0; j < maxqsize; j++)
+			filter_devices[i].queue[j].body = kmalloc(maxmsgsize, GFP_KERNEL);
+		
 		filter_devices[i].r_counters = kmalloc(maxqsize * sizeof(int), GFP_KERNEL);
 		memset(filter_devices[i].r_counters, 0, maxqsize * sizeof(int));
 		filter_devices[i].index = 0;
@@ -640,7 +642,7 @@ static int filter_init(void)
 		filter_setup_cdev(&filter_devices[i], i);
 	}
 
-	printk(KERN_ALERT "Filter, world\n");
+//	printk(KERN_ALERT "Filter, world\n");
 	return 0;
 	
 fail:
