@@ -7,8 +7,9 @@
 int main()
 {
 	int fd, result, len;
-	char buf[10];
+	unsigned char buf[10];
 	char *str;
+	
 	
 	if ((fd = open("/dev/filter1", O_WRONLY)) == -1)
 	{
@@ -21,16 +22,40 @@ int main()
 
 	struct filter_message *p = malloc(sizeof(struct filter_message) + 10);
 	strncpy(p->body, buf, 10);
+	p->tag = 'D';
 	
-	str = p->body;
-	
-	printf("BODY: %s %d\n", p->body, strlen(p->body));
+	printf("sent: %c %s\n", p->tag, p->body);
 
 	if ((result = write (fd, p, sizeof(struct filter_message) + 10)) != 5)
 	{
 		perror("writing");
 		return -1;
 	}
+	printf("result: %d\n", result);
+
+	struct filter_message *p2 = malloc(sizeof(struct filter_message) + 10);
+	strncpy(p2->body, buf, 10);
+	p2->tag = 'E';
+	printf("sent: %c %s\n", p2->tag, p2->body);
+
+	if ((result = write (fd, p2, sizeof(struct filter_message) + 10)) != 5)
+	{
+		perror("writing");
+		return -1;
+	}
+	printf("result: %d\n", result);
+	
+	struct filter_message *p3 = malloc(sizeof(struct filter_message) + 10);
+	strncpy(p3->body, buf, 10);
+	p3->tag = 'F';
+	printf("sent: %c %s\n", p3->tag, p3->body);
+
+	if ((result = write (fd, p3, sizeof(struct filter_message) + 10)) != 5)
+	{
+		perror("writing");
+		return -1;
+	}
+	printf("result: %d\n", result);
 	
 	close(fd);
 	return 0;

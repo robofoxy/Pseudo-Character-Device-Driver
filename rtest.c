@@ -16,6 +16,10 @@ int main()
 		return -1;
 	}
 	
+	read(fd, buf, 8);
+	
+	printf("buf: %s\n", buf);
+	
 	close(fd);
 	return 0;
 }

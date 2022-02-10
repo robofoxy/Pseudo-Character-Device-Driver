@@ -52,6 +52,23 @@ int main()
 	ioctl (fd, FILTER_IOCGTAGS,tags);
 	printf("TAGS: %s\n", tags);
 	
+	struct filter_message *p = malloc(sizeof(struct filter_message) + 10);
+	
+	read(fd, p, sizeof(struct filter_message) + 10);
+	printf("tag: %c\n", p->tag);
+	printf("buf: %s\n", p->body);
+	read(fd, p, sizeof(struct filter_message) + 10);
+	printf("tag: %c\n", p->tag);
+	printf("buf: %s\n", p->body);
+	read(fd, p, sizeof(struct filter_message) + 10);
+	printf("tag: %c\n", p->tag);
+	printf("buf: %s\n", p->body);
+	read(fd, p, sizeof(struct filter_message) + 10);
+	printf("tag: %c\n", p->tag);
+	printf("buf: %s\n", p->body);
+	
+	
+	
 	close(fd);
 	return 0;
 }
